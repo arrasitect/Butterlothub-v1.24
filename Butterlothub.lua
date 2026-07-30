@@ -37,6 +37,13 @@ local playerListLabels = {}
 local respawnDetected = false
 local superMoneyJustEnabled = false
 
+-- NEW STATE
+local noclipEnabled = false
+local espEnabled = false
+local scriptUserEspEnabled = false
+local espHighlights = {}
+local scriptUsers = {}
+
 local toggleRefs = {}
 
 local old = PlayerGui:FindFirstChild("DScript")
@@ -224,6 +231,211 @@ local function disableFullbright()
     fullbrightOn = false
 end
 
+-- =========================
+--   NOCLIP
+-- =========================
+local noclipTouched = {}
+
+local function applyNoclip()
+    local c = player.Character
+    if not c then return end
+    for _, part in ipairs(c:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            noclipTouched[part] = true
+            part.CanCollide = false
+        end
+    end
+end
+
+local function restoreNoclip()
+    for part in pairs(noclipTouched) do
+        if part and part.Parent then
+            pcall(function() part.CanCollide = true end)
+        end
+    end
+    noclipTouched = {}
+end
+
+RunService.Stepped:Connect(function()
+    if noclipEnabled then
+        applyNoclip()
+    end
+end)
+
+-- =========================
+--   ESP  (team colored)
+-- =========================
+local DRIVER_COLOR = Color3.fromRGB(255, 45, 45)     -- Drivers  = red
+local SURVIVOR_COLOR = Color3.fromRGB(45, 130, 255)  -- Survivors = blue
+local OTHER_COLOR = Color3.fromRGB(60, 220, 90)      -- everyone else = green
+local SCRIPT_USER_COLOR = Color3.fromRGB(255, 255, 255) -- same-script users = white
+
+local function isDriverTeam(team)
+    if not team then return false end
+    local n = string.lower(team.Name)
+    return n == "drivers" or n == "driver"
+end
+
+local function isSurvivorTeam(team)
+    if not team then return false end
+    local n = string.lower(team.Name)
+    return n == "survivors" or n == "survivor" or n == "runners" or n == "runner"
+end
+
+local function colorForPlayer(p)
+    if scriptUserEspEnabled and scriptUsers[p.UserId] then
+        return SCRIPT_USER_COLOR, true
+    end
+    if isDriverTeam(p.Team) then
+        return DRIVER_COLOR, false
+    elseif isSurvivorTeam(p.Team) then
+        return SURVIVOR_COLOR, false
+    end
+    return OTHER_COLOR, false
+end
+
+local function removeHighlight(p)
+    local hl = espHighlights[p]
+    if hl then
+        hl:Destroy()
+        espHighlights[p] = nil
+    end
+end
+
+local function clearAllHighlights()
+    for p, hl in pairs(espHighlights) do
+        if hl then hl:Destroy() end
+        espHighlights[p] = nil
+    end
+end
+
+local function updateEsp()
+    local wantAny = espEnabled or scriptUserEspEnabled
+    if not wantAny then
+        if next(espHighlights) then clearAllHighlights() end
+        return
+    end
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= player then
+            local char = p.Character
+            local isScriptUser = scriptUsers[p.UserId] and scriptUserEspEnabled
+            local show = char and char:FindFirstChild("HumanoidRootPart") and (espEnabled or isScriptUser)
+
+            if show then
+                local hl = espHighlights[p]
+                if not hl or not hl.Parent then
+                    hl = Instance.new("Highlight")
+                    hl.Name = "DScriptESP_" .. p.Name
+                    hl.FillTransparency = 0.6
+                    hl.OutlineTransparency = 0
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.Parent = gui
+                    espHighlights[p] = hl
+                end
+                hl.Adornee = char
+
+                local col, scriptUser = colorForPlayer(p)
+                hl.OutlineColor = col
+                hl.FillColor = col
+                hl.FillTransparency = scriptUser and 0.85 or 0.6
+            else
+                removeHighlight(p)
+            end
+        end
+    end
+
+    for p in pairs(espHighlights) do
+        if not p.Parent then
+            removeHighlight(p)
+        end
+    end
+end
+
+task.spawn(function()
+    while true do
+        pcall(updateEsp)
+        task.wait(0.35)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(p)
+    removeHighlight(p)
+    scriptUsers[p.UserId] = nil
+end)
+
+-- =========================
+--   SAME-SCRIPT USER DETECTION
+-- =========================
+-- Clients running this script broadcast a hidden zero-width signature over
+-- chat. Anyone else running it recognises the tag and gets a white outline.
+local SIGNATURE = "\u{200B}\u{2060}\u{200B}DSCRIPT_SYNC\u{200B}\u{2060}\u{200B}"
+
+local function markScriptUser(userId)
+    if not userId or userId == player.UserId then return end
+    scriptUsers[userId] = os.clock()
+end
+
+local function broadcastPresence()
+    pcall(function()
+        local TextChatService = game:GetService("TextChatService")
+        if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+            local channels = TextChatService:FindFirstChild("TextChannels")
+            local general = channels and channels:FindFirstChild("RBXGeneral")
+            if general then
+                general:SendAsync(SIGNATURE)
+            end
+        else
+            local ReplicatedStorage = game:GetService("ReplicatedStorage")
+            local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+            local say = events and events:FindFirstChild("SayMessageRequest")
+            if say then
+                say:FireServer(SIGNATURE, "All")
+            end
+        end
+    end)
+end
+
+pcall(function()
+    local TextChatService = game:GetService("TextChatService")
+    TextChatService.MessageReceived:Connect(function(message)
+        if message.Text and string.find(message.Text, "DSCRIPT_SYNC", 1, true) then
+            local src = message.TextSource
+            if src then
+                markScriptUser(src.UserId)
+            end
+        end
+    end)
+end)
+
+local function hookChatted(p)
+    p.Chatted:Connect(function(msg)
+        if string.find(msg, "DSCRIPT_SYNC", 1, true) then
+            markScriptUser(p.UserId)
+        end
+    end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= player then hookChatted(p) end
+end
+Players.PlayerAdded:Connect(function(p)
+    if p ~= player then
+        hookChatted(p)
+        task.delay(3, broadcastPresence) -- announce ourselves to the new joiner
+    end
+end)
+
+task.spawn(function()
+    task.wait(4)
+    while true do
+        if scriptUserEspEnabled then
+            broadcastPresence()
+        end
+        task.wait(45)
+    end
+end)
+
 local BTN_HEIGHT = 28
 local BTN_GAP = 7
 local PADDING = 5
@@ -391,6 +603,49 @@ local pageConfig = {
                     else
                         disableFullbright()
                     end
+                end,
+            },
+            {
+                type = "toggle",
+                text = "Noclip",
+                color = Color3.fromRGB(120, 80, 200),
+                enabledColor = Color3.fromRGB(60, 200, 60),
+                getState = function() return noclipEnabled end,
+                toggleCallback = function()
+                    noclipEnabled = not noclipEnabled
+                    if not noclipEnabled then
+                        restoreNoclip()
+                    end
+                end,
+            },
+            {
+                type = "toggle",
+                text = "ESP",
+                color = Color3.fromRGB(200, 110, 40),
+                enabledColor = Color3.fromRGB(60, 200, 60),
+                getState = function() return espEnabled end,
+                toggleCallback = function()
+                    espEnabled = not espEnabled
+                    if not espEnabled and not scriptUserEspEnabled then
+                        clearAllHighlights()
+                    end
+                    pcall(updateEsp)
+                end,
+            },
+            {
+                type = "toggle",
+                text = "Script User ESP",
+                color = Color3.fromRGB(90, 90, 120),
+                enabledColor = Color3.fromRGB(230, 230, 240),
+                getState = function() return scriptUserEspEnabled end,
+                toggleCallback = function()
+                    scriptUserEspEnabled = not scriptUserEspEnabled
+                    if scriptUserEspEnabled then
+                        task.spawn(broadcastPresence)
+                    elseif not espEnabled then
+                        clearAllHighlights()
+                    end
+                    pcall(updateEsp)
                 end,
             },
         },
@@ -840,7 +1095,6 @@ end)
 -- =========================
 --   ANTI-DRIVER LOCKOUT
 -- =========================
--- Works whether or not the creator is in the server.
 task.spawn(function()
     while true do
         local shouldLock = false
