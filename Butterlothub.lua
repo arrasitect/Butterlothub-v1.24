@@ -37,10 +37,9 @@ local playerListLabels = {}
 local respawnDetected = false
 local superMoneyJustEnabled = false
 
--- NEW STATE
 local noclipEnabled = false
 local espEnabled = false
-local scriptUserEspEnabled = false
+local scriptUserEspEnabled = true
 local espHighlights = {}
 local scriptUsers = {}
 
@@ -55,9 +54,6 @@ gui.Name = "DScript"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 
--- =========================
---   CREATOR INTRO OVERLAY
--- =========================
 local introPlaying = false
 
 local function playIntro(message)
@@ -231,9 +227,6 @@ local function disableFullbright()
     fullbrightOn = false
 end
 
--- =========================
---   NOCLIP
--- =========================
 local noclipTouched = {}
 
 local function applyNoclip()
@@ -262,13 +255,10 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- =========================
---   ESP  (team colored)
--- =========================
-local DRIVER_COLOR = Color3.fromRGB(255, 45, 45)     -- Drivers  = red
-local SURVIVOR_COLOR = Color3.fromRGB(45, 130, 255)  -- Survivors = blue
-local OTHER_COLOR = Color3.fromRGB(60, 220, 90)      -- everyone else = green
-local SCRIPT_USER_COLOR = Color3.fromRGB(255, 255, 255) -- same-script users = white
+local DRIVER_COLOR = Color3.fromRGB(255, 45, 45)
+local SURVIVOR_COLOR = Color3.fromRGB(45, 130, 255)
+local OTHER_COLOR = Color3.fromRGB(60, 220, 90)
+local SCRIPT_USER_COLOR = Color3.fromRGB(255, 255, 255)
 
 local function isDriverTeam(team)
     if not team then return false end
@@ -283,7 +273,7 @@ local function isSurvivorTeam(team)
 end
 
 local function colorForPlayer(p)
-    if scriptUserEspEnabled and scriptUsers[p.UserId] then
+    if scriptUsers[p.UserId] then
         return SCRIPT_USER_COLOR, true
     end
     if isDriverTeam(p.Team) then
@@ -310,16 +300,10 @@ local function clearAllHighlights()
 end
 
 local function updateEsp()
-    local wantAny = espEnabled or scriptUserEspEnabled
-    if not wantAny then
-        if next(espHighlights) then clearAllHighlights() end
-        return
-    end
-
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= player then
             local char = p.Character
-            local isScriptUser = scriptUsers[p.UserId] and scriptUserEspEnabled
+            local isScriptUser = scriptUsers[p.UserId] ~= nil
             local show = char and char:FindFirstChild("HumanoidRootPart") and (espEnabled or isScriptUser)
 
             if show then
@@ -364,75 +348,57 @@ Players.PlayerRemoving:Connect(function(p)
     scriptUsers[p.UserId] = nil
 end)
 
--- =========================
---   SAME-SCRIPT USER DETECTION
--- =========================
--- Clients running this script broadcast a hidden zero-width signature over
--- chat. Anyone else running it recognises the tag and gets a white outline.
-local SIGNATURE = "\u{200B}\u{2060}\u{200B}DSCRIPT_SYNC\u{200B}\u{2060}\u{200B}"
+local SIG_VALUE = 8731.4219
+local SIG_EPSILON = 0.0005
+
+local function stampSignature(char)
+    char = char or player.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    pcall(function()
+        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
+        hum.NameDisplayDistance = SIG_VALUE
+    end)
+end
+
+local function hasSignature(p)
+    local char = p.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    return math.abs(hum.NameDisplayDistance - SIG_VALUE) < SIG_EPSILON
+end
 
 local function markScriptUser(userId)
     if not userId or userId == player.UserId then return end
     scriptUsers[userId] = os.clock()
 end
 
-local function broadcastPresence()
-    pcall(function()
-        local TextChatService = game:GetService("TextChatService")
-        if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
-            local channels = TextChatService:FindFirstChild("TextChannels")
-            local general = channels and channels:FindFirstChild("RBXGeneral")
-            if general then
-                general:SendAsync(SIGNATURE)
-            end
-        else
-            local ReplicatedStorage = game:GetService("ReplicatedStorage")
-            local events = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
-            local say = events and events:FindFirstChild("SayMessageRequest")
-            if say then
-                say:FireServer(SIGNATURE, "All")
-            end
-        end
-    end)
-end
-
-pcall(function()
-    local TextChatService = game:GetService("TextChatService")
-    TextChatService.MessageReceived:Connect(function(message)
-        if message.Text and string.find(message.Text, "DSCRIPT_SYNC", 1, true) then
-            local src = message.TextSource
-            if src then
-                markScriptUser(src.UserId)
-            end
-        end
-    end)
-end)
-
-local function hookChatted(p)
-    p.Chatted:Connect(function(msg)
-        if string.find(msg, "DSCRIPT_SYNC", 1, true) then
-            markScriptUser(p.UserId)
-        end
-    end)
-end
-
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= player then hookChatted(p) end
-end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= player then
-        hookChatted(p)
-        task.delay(3, broadcastPresence) -- announce ourselves to the new joiner
+task.spawn(function()
+    while true do
+        pcall(stampSignature)
+        task.wait(2)
     end
 end)
 
+player.CharacterAdded:Connect(function(c)
+    task.wait(0.5)
+    stampSignature(c)
+end)
+
 task.spawn(function()
-    task.wait(4)
     while true do
-        if scriptUserEspEnabled then
-            broadcastPresence()
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player then
+                if hasSignature(p) then
+                    markScriptUser(p.UserId)
+                else
+                    scriptUsers[p.UserId] = nil
+                end
+            end
         end
-        task.wait(45)
+        task.wait(1)
     end
 end)
 
@@ -453,7 +419,6 @@ local collectBtn = nil
 
 local pageWidgets = {}
 
--- refreshes a toggle button's visual state from outside a click
 local function refreshToggle(name)
     local ref = toggleRefs[name]
     if not ref or not ref.btn or not ref.btn.Parent then return end
@@ -522,8 +487,8 @@ local pageConfig = {
 
                     tp(platformCF + Vector3.new(0, 3, 0))
 
-                    spawn(function()
-                        wait(30)
+                    task.spawn(function()
+                        task.wait(30)
                         if platform and platform.Parent then
                             platform:Destroy()
                         end
@@ -626,23 +591,7 @@ local pageConfig = {
                 getState = function() return espEnabled end,
                 toggleCallback = function()
                     espEnabled = not espEnabled
-                    if not espEnabled and not scriptUserEspEnabled then
-                        clearAllHighlights()
-                    end
-                    pcall(updateEsp)
-                end,
-            },
-            {
-                type = "toggle",
-                text = "Script User ESP",
-                color = Color3.fromRGB(90, 90, 120),
-                enabledColor = Color3.fromRGB(230, 230, 240),
-                getState = function() return scriptUserEspEnabled end,
-                toggleCallback = function()
-                    scriptUserEspEnabled = not scriptUserEspEnabled
-                    if scriptUserEspEnabled then
-                        task.spawn(broadcastPresence)
-                    elseif not espEnabled then
+                    if not espEnabled then
                         clearAllHighlights()
                     end
                     pcall(updateEsp)
@@ -753,8 +702,9 @@ local pageConfig = {
                         end
                     end
 
-                    spawn(function()
-                        while wait(5) do
+                    task.spawn(function()
+                        while true do
+                            task.wait(5)
                             if driverDropdownOpen then
                                 refreshPlayerList()
                             end
@@ -1041,9 +991,6 @@ end)
 
 buildMenu()
 
--- =========================
---   CREATOR DETECTION
--- =========================
 local greetedCreator = false
 
 local function isCreator(p)
@@ -1058,7 +1005,6 @@ local function greetFor(p)
     end
 end
 
--- On load: executor is the creator, or the creator is already in the server
 if isCreator(player) then
     greetedCreator = true
     task.spawn(function()
@@ -1078,7 +1024,6 @@ else
     end
 end
 
--- If the creator joins after the script loaded
 Players.PlayerAdded:Connect(function(p)
     if isCreator(p) and not greetedCreator then
         greetedCreator = true
@@ -1092,9 +1037,6 @@ Players.PlayerRemoving:Connect(function(p)
     end
 end)
 
--- =========================
---   ANTI-DRIVER LOCKOUT
--- =========================
 task.spawn(function()
     while true do
         local shouldLock = false
@@ -1159,7 +1101,7 @@ if Teams then
     end
 end
 
-spawn(function()
+task.spawn(function()
     while true do
         task.wait(0.5)
         if superMoneyEnabled and selectedDriver then
