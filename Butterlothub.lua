@@ -58,6 +58,12 @@ gui.Name = "DScript"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 
+-- Dedicated container for ESP highlights (kept out of the menu ScreenGui so
+-- rebuilding/hiding the UI can never affect ESP rendering).
+local espFolder = Instance.new("Folder")
+espFolder.Name = "DScriptESP"
+espFolder.Parent = gui
+
 local introPlaying = false
 
 local function playIntro(message)
@@ -281,18 +287,62 @@ local function isSurvivorTeam(team)
     return n == "survivors" or n == "survivor" or n == "runners" or n == "runner"
 end
 
--- Priority: 1) gold creator ESP  2) white script-user ESP (only when NOT on
--- Drivers/Runners)  3) team colors
+local SIG_NAME = "DScriptUserTag"
+local SIG_VALUE = 8731.4219
+local SIG_EPSILON = 0.0005
+
+local function stampSignature(char)
+    char = char or player.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
+    if not root then return end
+
+    local tag = char:FindFirstChild(SIG_NAME, true)
+    if tag and tag:IsA("NumberValue") and tag.Parent == root then
+        tag.Value = SIG_VALUE
+        return
+    end
+    if tag then pcall(function() tag:Destroy() end) end
+
+    pcall(function()
+        local v = Instance.new("NumberValue")
+        v.Name = SIG_NAME
+        v.Value = SIG_VALUE
+        v.Parent = root
+    end)
+end
+
+local function hasSignature(p)
+    local char = p.Character
+    if not char then return false end
+    local tag = char:FindFirstChild(SIG_NAME, true)
+    if tag and tag:IsA("NumberValue") and math.abs(tag.Value - SIG_VALUE) < SIG_EPSILON then
+        return true
+    end
+    return false
+end
+
+local function isScriptUserPlayer(p)
+    if p == player then return true end -- we are obviously running the script
+    return scriptUsers[p.UserId] ~= nil
+end
+
+local function showsWhiteEsp(p)
+    if isCreator(p) then return false end
+    if not isScriptUserPlayer(p) then return false end
+    if isDriverTeam(p.Team) or isSurvivorTeam(p.Team) then return false end
+    return true
+end
+
 local function colorForPlayer(p)
     if isCreator(p) then
         return CREATOR_COLOR, "creator"
     end
 
-    local onTeamedSide = isDriverTeam(p.Team) or isSurvivorTeam(p.Team)
-
-    if scriptUsers[p.UserId] and not onTeamedSide then
+    if showsWhiteEsp(p) then
         return SCRIPT_USER_COLOR, "scriptuser"
     end
+
 
     if isDriverTeam(p.Team) then
         return DRIVER_COLOR, "team"
@@ -317,43 +367,74 @@ local function clearAllHighlights()
     end
 end
 
+local function foreignHighlightExists(char)
+    for _, inst in ipairs(char:GetDescendants()) do
+        if inst:IsA("Highlight") and not string.find(inst.Name, "DScriptESP", 1, true) then
+            return true
+        end
+    end
+    for _, inst in ipairs(espFolder.Parent:GetDescendants()) do
+        if inst:IsA("Highlight") and inst.Adornee == char
+            and not string.find(inst.Name, "DScriptESP", 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function bumpToFront(hl)
+    -- cheap way to force re-render last: detach + reattach
+    local parent = hl.Parent
+    hl.Parent = nil
+    hl.Parent = parent
+end
+
+local function applyHighlight(p, char, forceTop)
+    local hl = espHighlights[p]
+    if not hl or not hl.Parent then
+        hl = Instance.new("Highlight")
+        hl.Name = "DScriptESP_" .. p.Name
+        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        hl.OutlineTransparency = 0
+        hl.FillTransparency = 0.6
+        hl.Parent = espFolder
+        espHighlights[p] = hl
+    end
+    hl.Adornee = char
+
+    local col, kind = colorForPlayer(p)
+    hl.OutlineColor = col
+    hl.FillColor = col
+    if kind == "creator" then
+        hl.FillTransparency = 0.35
+    elseif kind == "scriptuser" then
+        hl.FillTransparency = 0.55 -- more visible white
+    else
+        hl.FillTransparency = 0.6
+    end
+
+    if forceTop and foreignHighlightExists(char) then
+        bumpToFront(hl)
+    end
+end
+
 local function updateEsp()
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= player then
-            local char = p.Character
-            local creator = isCreator(p)
-            local isScriptUser = scriptUsers[p.UserId] ~= nil
-                and not (isDriverTeam(p.Team) or isSurvivorTeam(p.Team))
-            -- creator gold ESP is permanently on, regardless of the ESP toggle
-            local show = char and char:FindFirstChild("HumanoidRootPart")
-                and (espEnabled or creator or (scriptUserEspEnabled and isScriptUser))
+        local char = p.Character
+        local creator = isCreator(p)
+        local whiteUser = showsWhiteEsp(p)
+        local show = char and char:FindFirstChild("HumanoidRootPart")
+            and (
+                (espEnabled and p ~= player)
+                or creator
+                or (scriptUserEspEnabled and whiteUser)
+            )
 
-            if show then
-                local hl = espHighlights[p]
-                if not hl or not hl.Parent then
-                    hl = Instance.new("Highlight")
-                    hl.Name = "DScriptESP_" .. p.Name
-                    hl.FillTransparency = 0.6
-                    hl.OutlineTransparency = 0
-                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                    hl.Parent = gui
-                    espHighlights[p] = hl
-                end
-                hl.Adornee = char
 
-                local col, kind = colorForPlayer(p)
-                hl.OutlineColor = col
-                hl.FillColor = col
-                if kind == "creator" then
-                    hl.FillTransparency = 0.35
-                elseif kind == "scriptuser" then
-                    hl.FillTransparency = 0.85
-                else
-                    hl.FillTransparency = 0.6
-                end
-            else
-                removeHighlight(p)
-            end
+        if show then
+            applyHighlight(p, char, true)
+        else
+            removeHighlight(p)
         end
     end
 
@@ -377,33 +458,12 @@ Players.PlayerRemoving:Connect(function(p)
     creatorPlayers[p.UserId] = nil
 end)
 
-local SIG_VALUE = 8731.4219
-local SIG_EPSILON = 0.0005
-
-local function stampSignature(char)
-    char = char or player.Character
-    if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return end
-    pcall(function()
-        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
-        hum.NameDisplayDistance = SIG_VALUE
-    end)
-end
-
-local function hasSignature(p)
-    local char = p.Character
-    if not char then return false end
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
-    return math.abs(hum.NameDisplayDistance - SIG_VALUE) < SIG_EPSILON
-end
-
 local function markScriptUser(userId)
-    if not userId or userId == player.UserId then return end
+    if not userId then return end
     scriptUsers[userId] = os.clock()
 end
 
+-- Keep our own marker alive (respawns, sanity checks, other scripts removing it)
 task.spawn(function()
     while true do
         pcall(stampSignature)
@@ -416,9 +476,6 @@ player.CharacterAdded:Connect(function(c)
     stampSignature(c)
 end)
 
--- Developer presence watchdog: checks every 5 seconds whether the script
--- developer is in the server. While present, script-user detection is paused
--- (and cleared) until the developer leaves.
 task.spawn(function()
     while true do
         local present = false
@@ -429,32 +486,25 @@ task.spawn(function()
                 creatorPlayers[p.UserId] = true
             end
         end
-
-        if present and not creatorPresent then
-            table.clear(scriptUsers)
-        end
         creatorPresent = present
-
         task.wait(5)
     end
 end)
 
--- Script-user detection: runs every 5 seconds, skipped entirely while the
--- developer is in the server.
+-- Script-user detection: always runs, for every other player.
 task.spawn(function()
     while true do
-        if not creatorPresent then
-            for _, p in ipairs(Players:GetPlayers()) do
-                if p ~= player and not isCreator(p) then
-                    if hasSignature(p) then
-                        markScriptUser(p.UserId)
-                    else
-                        scriptUsers[p.UserId] = nil
-                    end
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= player then
+                if hasSignature(p) then
+                    markScriptUser(p.UserId)
+                else
+                    scriptUsers[p.UserId] = nil
                 end
             end
         end
-        task.wait(5)
+        pcall(updateEsp)
+        task.wait(2)
     end
 end)
 
@@ -648,6 +698,20 @@ local pageConfig = {
                 toggleCallback = function()
                     espEnabled = not espEnabled
                     if not espEnabled then
+                        clearAllHighlights()
+                    end
+                    pcall(updateEsp)
+                end,
+            },
+            {
+                type = "toggle",
+                text = "Script User ESP",
+                color = Color3.fromRGB(90, 90, 110),
+                enabledColor = Color3.fromRGB(60, 200, 60),
+                getState = function() return scriptUserEspEnabled end,
+                toggleCallback = function()
+                    scriptUserEspEnabled = not scriptUserEspEnabled
+                    if not scriptUserEspEnabled then
                         clearAllHighlights()
                     end
                     pcall(updateEsp)
@@ -1134,6 +1198,7 @@ collectBtn.MouseButton1Click:Connect(function()
 end)
 
 buildMenu()
+stampSignature()
 
 local greetedCreator = false
 
@@ -1168,7 +1233,6 @@ Players.PlayerAdded:Connect(function(p)
     if isCreator(p) then
         creatorPresent = true
         creatorPlayers[p.UserId] = true
-        table.clear(scriptUsers)
         pcall(updateEsp)
 
         if not greetedCreator then
@@ -1278,4 +1342,4 @@ task.spawn(function()
     end
 end)
 
-print("Loaded! (Modular Edition)")
+print("Loaded!")
