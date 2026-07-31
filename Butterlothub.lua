@@ -43,6 +43,10 @@ local scriptUserEspEnabled = true
 local espHighlights = {}
 local scriptUsers = {}
 
+-- Developer presence state
+local creatorPresent = false
+local creatorPlayers = {}
+
 local toggleRefs = {}
 
 local old = PlayerGui:FindFirstChild("DScript")
@@ -259,6 +263,11 @@ local DRIVER_COLOR = Color3.fromRGB(255, 45, 45)
 local SURVIVOR_COLOR = Color3.fromRGB(45, 130, 255)
 local OTHER_COLOR = Color3.fromRGB(60, 220, 90)
 local SCRIPT_USER_COLOR = Color3.fromRGB(255, 255, 255)
+local CREATOR_COLOR = Color3.fromRGB(255, 200, 40) -- gold (top priority)
+
+local function isCreator(p)
+    return p ~= nil and p.UserId == CREATOR_ID
+end
 
 local function isDriverTeam(team)
     if not team then return false end
@@ -272,16 +281,25 @@ local function isSurvivorTeam(team)
     return n == "survivors" or n == "survivor" or n == "runners" or n == "runner"
 end
 
+-- Priority: 1) gold creator ESP  2) white script-user ESP (only when NOT on
+-- Drivers/Runners)  3) team colors
 local function colorForPlayer(p)
-    if scriptUsers[p.UserId] then
-        return SCRIPT_USER_COLOR, true
+    if isCreator(p) then
+        return CREATOR_COLOR, "creator"
     end
+
+    local onTeamedSide = isDriverTeam(p.Team) or isSurvivorTeam(p.Team)
+
+    if scriptUsers[p.UserId] and not onTeamedSide then
+        return SCRIPT_USER_COLOR, "scriptuser"
+    end
+
     if isDriverTeam(p.Team) then
-        return DRIVER_COLOR, false
+        return DRIVER_COLOR, "team"
     elseif isSurvivorTeam(p.Team) then
-        return SURVIVOR_COLOR, false
+        return SURVIVOR_COLOR, "team"
     end
-    return OTHER_COLOR, false
+    return OTHER_COLOR, "team"
 end
 
 local function removeHighlight(p)
@@ -303,8 +321,12 @@ local function updateEsp()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= player then
             local char = p.Character
+            local creator = isCreator(p)
             local isScriptUser = scriptUsers[p.UserId] ~= nil
-            local show = char and char:FindFirstChild("HumanoidRootPart") and (espEnabled or isScriptUser)
+                and not (isDriverTeam(p.Team) or isSurvivorTeam(p.Team))
+            -- creator gold ESP is permanently on, regardless of the ESP toggle
+            local show = char and char:FindFirstChild("HumanoidRootPart")
+                and (espEnabled or creator or (scriptUserEspEnabled and isScriptUser))
 
             if show then
                 local hl = espHighlights[p]
@@ -319,10 +341,16 @@ local function updateEsp()
                 end
                 hl.Adornee = char
 
-                local col, scriptUser = colorForPlayer(p)
+                local col, kind = colorForPlayer(p)
                 hl.OutlineColor = col
                 hl.FillColor = col
-                hl.FillTransparency = scriptUser and 0.85 or 0.6
+                if kind == "creator" then
+                    hl.FillTransparency = 0.35
+                elseif kind == "scriptuser" then
+                    hl.FillTransparency = 0.85
+                else
+                    hl.FillTransparency = 0.6
+                end
             else
                 removeHighlight(p)
             end
@@ -346,6 +374,7 @@ end)
 Players.PlayerRemoving:Connect(function(p)
     removeHighlight(p)
     scriptUsers[p.UserId] = nil
+    creatorPlayers[p.UserId] = nil
 end)
 
 local SIG_VALUE = 8731.4219
@@ -387,18 +416,45 @@ player.CharacterAdded:Connect(function(c)
     stampSignature(c)
 end)
 
+-- Developer presence watchdog: checks every 5 seconds whether the script
+-- developer is in the server. While present, script-user detection is paused
+-- (and cleared) until the developer leaves.
 task.spawn(function()
     while true do
+        local present = false
+        table.clear(creatorPlayers)
         for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player then
-                if hasSignature(p) then
-                    markScriptUser(p.UserId)
-                else
-                    scriptUsers[p.UserId] = nil
+            if isCreator(p) then
+                present = true
+                creatorPlayers[p.UserId] = true
+            end
+        end
+
+        if present and not creatorPresent then
+            table.clear(scriptUsers)
+        end
+        creatorPresent = present
+
+        task.wait(5)
+    end
+end)
+
+-- Script-user detection: runs every 5 seconds, skipped entirely while the
+-- developer is in the server.
+task.spawn(function()
+    while true do
+        if not creatorPresent then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and not isCreator(p) then
+                    if hasSignature(p) then
+                        markScriptUser(p.UserId)
+                    else
+                        scriptUsers[p.UserId] = nil
+                    end
                 end
             end
         end
-        task.wait(1)
+        task.wait(5)
     end
 end)
 
@@ -993,10 +1049,6 @@ buildMenu()
 
 local greetedCreator = false
 
-local function isCreator(p)
-    return p and p.UserId == CREATOR_ID
-end
-
 local function greetFor(p)
     if isCreator(player) then
         playIntro("Welcome back master")
@@ -1025,15 +1077,26 @@ else
 end
 
 Players.PlayerAdded:Connect(function(p)
-    if isCreator(p) and not greetedCreator then
-        greetedCreator = true
-        greetFor(p)
+    if isCreator(p) then
+        creatorPresent = true
+        creatorPlayers[p.UserId] = true
+        table.clear(scriptUsers)
+        pcall(updateEsp)
+
+        if not greetedCreator then
+            greetedCreator = true
+            greetFor(p)
+        end
     end
 end)
 
 Players.PlayerRemoving:Connect(function(p)
     if isCreator(p) then
         greetedCreator = false
+        creatorPlayers[p.UserId] = nil
+        if next(creatorPlayers) == nil then
+            creatorPresent = false
+        end
     end
 end)
 
