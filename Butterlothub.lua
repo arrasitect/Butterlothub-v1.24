@@ -820,7 +820,7 @@ function buildMenu()
     local function computeScale()
         local cam = workspace.CurrentCamera
         local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
-        return math.clamp(math.min(vp.X / 560, vp.Y / 620), 0.6, 1.6)
+        return math.clamp(math.min(vp.X / 560, vp.Y / 620), 0.9, 1.9)
     end
 
     local restoreBar -- forward declaration (created below)
