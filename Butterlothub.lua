@@ -813,6 +813,36 @@ function buildMenu()
     mcorner.Parent = menu
     mcorner.CornerRadius = UDim.new(0, 10)
 
+    -- Responsive scaling (phones, tablets, desktop)
+    local menuScale = Instance.new("UIScale")
+    menuScale.Parent = menu
+
+    local function computeScale()
+        local cam = workspace.CurrentCamera
+        local vp = cam and cam.ViewportSize or Vector2.new(1280, 720)
+        return math.clamp(math.min(vp.X / 560, vp.Y / 620), 0.6, 1.6)
+    end
+
+    local restoreBar -- forward declaration (created below)
+    local restoreScale
+
+    local function applyScale()
+        local s = computeScale()
+        menuScale.Scale = s
+        if restoreScale then restoreScale.Scale = s end
+    end
+
+    applyScale()
+    if workspace.CurrentCamera then
+        workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(applyScale)
+    end
+    workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+        if workspace.CurrentCamera then
+            workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(applyScale)
+            applyScale()
+        end
+    end)
+
     local title = Instance.new("TextLabel")
     title.Parent = menu
     title.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT)
@@ -828,6 +858,64 @@ function buildMenu()
     local tcorner = Instance.new("UICorner")
     tcorner.Parent = title
     tcorner.CornerRadius = UDim.new(0, 10)
+
+    -- Hide button: small line in the top-right corner of the title bar
+    local hideBtn = Instance.new("TextButton")
+    hideBtn.Parent = title
+    hideBtn.Name = "HideBtn"
+    hideBtn.Size = UDim2.new(0, 26, 0, 20)
+    hideBtn.Position = UDim2.new(1, -32, 0.5, -10)
+    hideBtn.BackgroundTransparency = 1
+    hideBtn.Text = ""
+    hideBtn.AutoButtonColor = false
+    hideBtn.ZIndex = 5
+
+    local hideLine = Instance.new("Frame")
+    hideLine.Parent = hideBtn
+    hideLine.AnchorPoint = Vector2.new(0.5, 0.5)
+    hideLine.Position = UDim2.new(0.5, 0, 0.5, 0)
+    hideLine.Size = UDim2.new(0, 14, 0, 3)
+    hideLine.BackgroundColor3 = Color3.fromRGB(210, 210, 230)
+    hideLine.BackgroundTransparency = 0.15
+    hideLine.BorderSizePixel = 0
+    hideLine.ZIndex = 6
+    local hlCorner = Instance.new("UICorner")
+    hlCorner.Parent = hideLine
+    hlCorner.CornerRadius = UDim.new(1, 0)
+
+    -- Restore bar: semi-transparent small line at the top center of the screen
+    restoreBar = Instance.new("TextButton")
+    restoreBar.Parent = gui
+    restoreBar.Name = "RestoreBar"
+    restoreBar.AnchorPoint = Vector2.new(0.5, 0)
+    restoreBar.Position = UDim2.new(0.5, 0, 0, 8)
+    restoreBar.Size = UDim2.new(0, 70, 0, 8)
+    restoreBar.BackgroundColor3 = Color3.fromRGB(200, 200, 220)
+    restoreBar.BackgroundTransparency = 0.55
+    restoreBar.BorderSizePixel = 0
+    restoreBar.Text = ""
+    restoreBar.AutoButtonColor = false
+    restoreBar.Visible = false
+    restoreBar.ZIndex = 20
+
+    local rbCorner = Instance.new("UICorner")
+    rbCorner.Parent = restoreBar
+    rbCorner.CornerRadius = UDim.new(1, 0)
+
+    restoreScale = Instance.new("UIScale")
+    restoreScale.Parent = restoreBar
+    applyScale()
+
+    hideBtn.MouseButton1Click:Connect(function()
+        menu.Visible = false
+        if dropdownFrame then dropdownFrame.Visible = false end
+        restoreBar.Visible = true
+    end)
+
+    restoreBar.MouseButton1Click:Connect(function()
+        restoreBar.Visible = false
+        menu.Visible = true
+    end)
 
     local tabBar = Instance.new("Frame")
     tabBar.Parent = menu
