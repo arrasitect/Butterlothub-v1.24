@@ -39,11 +39,9 @@ local superMoneyJustEnabled = false
 
 local noclipEnabled = false
 local espEnabled = false
-local scriptUserEspEnabled = true
 local espHighlights = {}
 local scriptUsers = {}
 
--- Developer presence state
 local creatorPresent = false
 local creatorPlayers = {}
 
@@ -58,8 +56,6 @@ gui.Name = "DScript"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 
--- Dedicated container for ESP highlights (kept out of the menu ScreenGui so
--- rebuilding/hiding the UI can never affect ESP rendering).
 local espFolder = Instance.new("Folder")
 espFolder.Name = "DScriptESP"
 espFolder.Parent = gui
@@ -269,7 +265,7 @@ local DRIVER_COLOR = Color3.fromRGB(255, 45, 45)
 local SURVIVOR_COLOR = Color3.fromRGB(45, 130, 255)
 local OTHER_COLOR = Color3.fromRGB(60, 220, 90)
 local SCRIPT_USER_COLOR = Color3.fromRGB(255, 255, 255)
-local CREATOR_COLOR = Color3.fromRGB(255, 200, 40) -- gold (top priority)
+local CREATOR_COLOR = Color3.fromRGB(255, 200, 40)
 
 local function isCreator(p)
     return p ~= nil and p.UserId == CREATOR_ID
@@ -323,14 +319,13 @@ local function hasSignature(p)
 end
 
 local function isScriptUserPlayer(p)
-    if p == player then return true end -- we are obviously running the script
+    if p == player then return true end
     return scriptUsers[p.UserId] ~= nil
 end
 
 local function showsWhiteEsp(p)
     if isCreator(p) then return false end
     if not isScriptUserPlayer(p) then return false end
-    if isDriverTeam(p.Team) or isSurvivorTeam(p.Team) then return false end
     return true
 end
 
@@ -342,7 +337,6 @@ local function colorForPlayer(p)
     if showsWhiteEsp(p) then
         return SCRIPT_USER_COLOR, "scriptuser"
     end
-
 
     if isDriverTeam(p.Team) then
         return DRIVER_COLOR, "team"
@@ -383,7 +377,7 @@ local function foreignHighlightExists(char)
 end
 
 local function bumpToFront(hl)
-    -- cheap way to force re-render last: detach + reattach
+
     local parent = hl.Parent
     hl.Parent = nil
     hl.Parent = parent
@@ -408,7 +402,7 @@ local function applyHighlight(p, char, forceTop)
     if kind == "creator" then
         hl.FillTransparency = 0.35
     elseif kind == "scriptuser" then
-        hl.FillTransparency = 0.55 -- more visible white
+        hl.FillTransparency = 0.55
     else
         hl.FillTransparency = 0.6
     end
@@ -423,13 +417,13 @@ local function updateEsp()
         local char = p.Character
         local creator = isCreator(p)
         local whiteUser = showsWhiteEsp(p)
+
         local show = char and char:FindFirstChild("HumanoidRootPart")
             and (
                 (espEnabled and p ~= player)
                 or creator
-                or (scriptUserEspEnabled and whiteUser)
+                or whiteUser
             )
-
 
         if show then
             applyHighlight(p, char, true)
@@ -463,7 +457,6 @@ local function markScriptUser(userId)
     scriptUsers[userId] = os.clock()
 end
 
--- Keep our own marker alive (respawns, sanity checks, other scripts removing it)
 task.spawn(function()
     while true do
         pcall(stampSignature)
@@ -491,7 +484,6 @@ task.spawn(function()
     end
 end)
 
--- Script-user detection: always runs, for every other player.
 task.spawn(function()
     while true do
         for _, p in ipairs(Players:GetPlayers()) do
@@ -703,20 +695,6 @@ local pageConfig = {
                     pcall(updateEsp)
                 end,
             },
-            {
-                type = "toggle",
-                text = "Script User ESP",
-                color = Color3.fromRGB(90, 90, 110),
-                enabledColor = Color3.fromRGB(60, 200, 60),
-                getState = function() return scriptUserEspEnabled end,
-                toggleCallback = function()
-                    scriptUserEspEnabled = not scriptUserEspEnabled
-                    if not scriptUserEspEnabled then
-                        clearAllHighlights()
-                    end
-                    pcall(updateEsp)
-                end,
-            },
         },
     },
     Driver = {
@@ -877,7 +855,6 @@ function buildMenu()
     mcorner.Parent = menu
     mcorner.CornerRadius = UDim.new(0, 10)
 
-    -- Responsive scaling (phones, tablets, desktop)
     local menuScale = Instance.new("UIScale")
     menuScale.Parent = menu
 
@@ -887,7 +864,7 @@ function buildMenu()
         return math.clamp(math.min(vp.X / 560, vp.Y / 620), 0.9, 1.9)
     end
 
-    local restoreBar -- forward declaration (created below)
+    local restoreBar
     local restoreScale
 
     local function applyScale()
@@ -923,7 +900,6 @@ function buildMenu()
     tcorner.Parent = title
     tcorner.CornerRadius = UDim.new(0, 10)
 
-    -- Hide button: small line in the top-right corner of the title bar
     local hideBtn = Instance.new("TextButton")
     hideBtn.Parent = title
     hideBtn.Name = "HideBtn"
@@ -947,7 +923,6 @@ function buildMenu()
     hlCorner.Parent = hideLine
     hlCorner.CornerRadius = UDim.new(1, 0)
 
-    -- Restore bar: semi-transparent small line at the top center of the screen
     restoreBar = Instance.new("TextButton")
     restoreBar.Parent = gui
     restoreBar.Name = "RestoreBar"
@@ -1342,4 +1317,4 @@ task.spawn(function()
     end
 end)
 
-print("Loaded!")
+print("Loaded! (Modular Edition - ESP fix)")
