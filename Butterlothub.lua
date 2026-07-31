@@ -801,7 +801,7 @@ local pageConfig = {
 function buildMenu()
     menu = Instance.new("Frame")
     menu.Parent = gui
-    menu.Size = UDim2.new(0, 220, 0, 380)
+    menu.Size = UDim2.new(0, 440, 0, 760)
     menu.Position = UDim2.new(0.5, -110, 0.5, -190)
     menu.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
     menu.BackgroundTransparency = 0.15
