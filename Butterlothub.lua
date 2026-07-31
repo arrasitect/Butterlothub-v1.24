@@ -873,7 +873,7 @@ function buildMenu()
     local hideLine = Instance.new("Frame")
     hideLine.Parent = hideBtn
     hideLine.AnchorPoint = Vector2.new(0.5, 0.5)
-    hideLine.Position = UDim2.new(0.5, 0, 5, 0)
+    hideLine.Position = UDim2.new(0.5, 0, 0.5, 0)
     hideLine.Size = UDim2.new(0, 14, 0, 3)
     hideLine.BackgroundColor3 = Color3.fromRGB(210, 210, 230)
     hideLine.BackgroundTransparency = 0.15
@@ -888,7 +888,7 @@ function buildMenu()
     restoreBar.Parent = gui
     restoreBar.Name = "RestoreBar"
     restoreBar.AnchorPoint = Vector2.new(0.5, 0)
-    restoreBar.Position = UDim2.new(0.5, 0, 0, 8)
+    restoreBar.Position = UDim2.new(0.5, 0, 0, 50)
     restoreBar.Size = UDim2.new(0, 70, 0, 8)
     restoreBar.BackgroundColor3 = Color3.fromRGB(200, 200, 220)
     restoreBar.BackgroundTransparency = 0.55
