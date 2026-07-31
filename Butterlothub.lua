@@ -39,9 +39,11 @@ local superMoneyJustEnabled = false
 
 local noclipEnabled = false
 local espEnabled = false
+local scriptUserEspEnabled = true
 local espHighlights = {}
 local scriptUsers = {}
 
+-- Developer presence state
 local creatorPresent = false
 local creatorPlayers = {}
 
@@ -55,10 +57,6 @@ gui.Parent = PlayerGui
 gui.Name = "DScript"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
-
-local espFolder = Instance.new("Folder")
-espFolder.Name = "DScriptESP"
-espFolder.Parent = gui
 
 local introPlaying = false
 
@@ -265,7 +263,7 @@ local DRIVER_COLOR = Color3.fromRGB(255, 45, 45)
 local SURVIVOR_COLOR = Color3.fromRGB(45, 130, 255)
 local OTHER_COLOR = Color3.fromRGB(60, 220, 90)
 local SCRIPT_USER_COLOR = Color3.fromRGB(255, 255, 255)
-local CREATOR_COLOR = Color3.fromRGB(255, 200, 40)
+local CREATOR_COLOR = Color3.fromRGB(255, 200, 40) -- gold (top priority)
 
 local function isCreator(p)
     return p ~= nil and p.UserId == CREATOR_ID
@@ -283,58 +281,16 @@ local function isSurvivorTeam(team)
     return n == "survivors" or n == "survivor" or n == "runners" or n == "runner"
 end
 
-local SIG_NAME = "DScriptUserTag"
-local SIG_VALUE = 8731.4219
-local SIG_EPSILON = 0.0005
-
-local function stampSignature(char)
-    char = char or player.Character
-    if not char then return end
-    local root = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChildWhichIsA("BasePart")
-    if not root then return end
-
-    local tag = char:FindFirstChild(SIG_NAME, true)
-    if tag and tag:IsA("NumberValue") and tag.Parent == root then
-        tag.Value = SIG_VALUE
-        return
-    end
-    if tag then pcall(function() tag:Destroy() end) end
-
-    pcall(function()
-        local v = Instance.new("NumberValue")
-        v.Name = SIG_NAME
-        v.Value = SIG_VALUE
-        v.Parent = root
-    end)
-end
-
-local function hasSignature(p)
-    local char = p.Character
-    if not char then return false end
-    local tag = char:FindFirstChild(SIG_NAME, true)
-    if tag and tag:IsA("NumberValue") and math.abs(tag.Value - SIG_VALUE) < SIG_EPSILON then
-        return true
-    end
-    return false
-end
-
-local function isScriptUserPlayer(p)
-    if p == player then return true end
-    return scriptUsers[p.UserId] ~= nil
-end
-
-local function showsWhiteEsp(p)
-    if isCreator(p) then return false end
-    if not isScriptUserPlayer(p) then return false end
-    return true
-end
-
+-- Priority: 1) gold creator ESP  2) white script-user ESP (only when NOT on
+-- Drivers/Runners)  3) team colors
 local function colorForPlayer(p)
     if isCreator(p) then
         return CREATOR_COLOR, "creator"
     end
 
-    if showsWhiteEsp(p) then
+    local onTeamedSide = isDriverTeam(p.Team) or isSurvivorTeam(p.Team)
+
+    if scriptUsers[p.UserId] and not onTeamedSide then
         return SCRIPT_USER_COLOR, "scriptuser"
     end
 
@@ -361,74 +317,43 @@ local function clearAllHighlights()
     end
 end
 
-local function foreignHighlightExists(char)
-    for _, inst in ipairs(char:GetDescendants()) do
-        if inst:IsA("Highlight") and not string.find(inst.Name, "DScriptESP", 1, true) then
-            return true
-        end
-    end
-    for _, inst in ipairs(espFolder.Parent:GetDescendants()) do
-        if inst:IsA("Highlight") and inst.Adornee == char
-            and not string.find(inst.Name, "DScriptESP", 1, true) then
-            return true
-        end
-    end
-    return false
-end
-
-local function bumpToFront(hl)
-
-    local parent = hl.Parent
-    hl.Parent = nil
-    hl.Parent = parent
-end
-
-local function applyHighlight(p, char, forceTop)
-    local hl = espHighlights[p]
-    if not hl or not hl.Parent then
-        hl = Instance.new("Highlight")
-        hl.Name = "DScriptESP_" .. p.Name
-        hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        hl.OutlineTransparency = 0
-        hl.FillTransparency = 0.6
-        hl.Parent = espFolder
-        espHighlights[p] = hl
-    end
-    hl.Adornee = char
-
-    local col, kind = colorForPlayer(p)
-    hl.OutlineColor = col
-    hl.FillColor = col
-    if kind == "creator" then
-        hl.FillTransparency = 0.35
-    elseif kind == "scriptuser" then
-        hl.FillTransparency = 0.55
-    else
-        hl.FillTransparency = 0.6
-    end
-
-    if forceTop and foreignHighlightExists(char) then
-        bumpToFront(hl)
-    end
-end
-
 local function updateEsp()
     for _, p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        local creator = isCreator(p)
-        local whiteUser = showsWhiteEsp(p)
+        if p ~= player then
+            local char = p.Character
+            local creator = isCreator(p)
+            local isScriptUser = scriptUsers[p.UserId] ~= nil
+                and not (isDriverTeam(p.Team) or isSurvivorTeam(p.Team))
+            -- creator gold ESP is permanently on, regardless of the ESP toggle
+            local show = char and char:FindFirstChild("HumanoidRootPart")
+                and (espEnabled or creator or (scriptUserEspEnabled and isScriptUser))
 
-        local show = char and char:FindFirstChild("HumanoidRootPart")
-            and (
-                (espEnabled and p ~= player)
-                or creator
-                or whiteUser
-            )
+            if show then
+                local hl = espHighlights[p]
+                if not hl or not hl.Parent then
+                    hl = Instance.new("Highlight")
+                    hl.Name = "DScriptESP_" .. p.Name
+                    hl.FillTransparency = 0.6
+                    hl.OutlineTransparency = 0
+                    hl.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                    hl.Parent = gui
+                    espHighlights[p] = hl
+                end
+                hl.Adornee = char
 
-        if show then
-            applyHighlight(p, char, true)
-        else
-            removeHighlight(p)
+                local col, kind = colorForPlayer(p)
+                hl.OutlineColor = col
+                hl.FillColor = col
+                if kind == "creator" then
+                    hl.FillTransparency = 0.35
+                elseif kind == "scriptuser" then
+                    hl.FillTransparency = 0.85
+                else
+                    hl.FillTransparency = 0.6
+                end
+            else
+                removeHighlight(p)
+            end
         end
     end
 
@@ -452,8 +377,30 @@ Players.PlayerRemoving:Connect(function(p)
     creatorPlayers[p.UserId] = nil
 end)
 
+local SIG_VALUE = 8731.4219
+local SIG_EPSILON = 0.0005
+
+local function stampSignature(char)
+    char = char or player.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return end
+    pcall(function()
+        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.Viewer
+        hum.NameDisplayDistance = SIG_VALUE
+    end)
+end
+
+local function hasSignature(p)
+    local char = p.Character
+    if not char then return false end
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum then return false end
+    return math.abs(hum.NameDisplayDistance - SIG_VALUE) < SIG_EPSILON
+end
+
 local function markScriptUser(userId)
-    if not userId then return end
+    if not userId or userId == player.UserId then return end
     scriptUsers[userId] = os.clock()
 end
 
@@ -469,6 +416,9 @@ player.CharacterAdded:Connect(function(c)
     stampSignature(c)
 end)
 
+-- Developer presence watchdog: checks every 5 seconds whether the script
+-- developer is in the server. While present, script-user detection is paused
+-- (and cleared) until the developer leaves.
 task.spawn(function()
     while true do
         local present = false
@@ -479,24 +429,32 @@ task.spawn(function()
                 creatorPlayers[p.UserId] = true
             end
         end
+
+        if present and not creatorPresent then
+            table.clear(scriptUsers)
+        end
         creatorPresent = present
+
         task.wait(5)
     end
 end)
 
+-- Script-user detection: runs every 5 seconds, skipped entirely while the
+-- developer is in the server.
 task.spawn(function()
     while true do
-        for _, p in ipairs(Players:GetPlayers()) do
-            if p ~= player then
-                if hasSignature(p) then
-                    markScriptUser(p.UserId)
-                else
-                    scriptUsers[p.UserId] = nil
+        if not creatorPresent then
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p ~= player and not isCreator(p) then
+                    if hasSignature(p) then
+                        markScriptUser(p.UserId)
+                    else
+                        scriptUsers[p.UserId] = nil
+                    end
                 end
             end
         end
-        pcall(updateEsp)
-        task.wait(2)
+        task.wait(5)
     end
 end)
 
@@ -855,6 +813,7 @@ function buildMenu()
     mcorner.Parent = menu
     mcorner.CornerRadius = UDim.new(0, 10)
 
+    -- Responsive scaling (phones, tablets, desktop)
     local menuScale = Instance.new("UIScale")
     menuScale.Parent = menu
 
@@ -864,7 +823,7 @@ function buildMenu()
         return math.clamp(math.min(vp.X / 560, vp.Y / 620), 0.9, 1.9)
     end
 
-    local restoreBar
+    local restoreBar -- forward declaration (created below)
     local restoreScale
 
     local function applyScale()
@@ -900,6 +859,7 @@ function buildMenu()
     tcorner.Parent = title
     tcorner.CornerRadius = UDim.new(0, 10)
 
+    -- Hide button: small line in the top-right corner of the title bar
     local hideBtn = Instance.new("TextButton")
     hideBtn.Parent = title
     hideBtn.Name = "HideBtn"
@@ -923,6 +883,7 @@ function buildMenu()
     hlCorner.Parent = hideLine
     hlCorner.CornerRadius = UDim.new(1, 0)
 
+    -- Restore bar: semi-transparent small line at the top center of the screen
     restoreBar = Instance.new("TextButton")
     restoreBar.Parent = gui
     restoreBar.Name = "RestoreBar"
@@ -1173,7 +1134,6 @@ collectBtn.MouseButton1Click:Connect(function()
 end)
 
 buildMenu()
-stampSignature()
 
 local greetedCreator = false
 
@@ -1208,6 +1168,7 @@ Players.PlayerAdded:Connect(function(p)
     if isCreator(p) then
         creatorPresent = true
         creatorPlayers[p.UserId] = true
+        table.clear(scriptUsers)
         pcall(updateEsp)
 
         if not greetedCreator then
@@ -1317,4 +1278,4 @@ task.spawn(function()
     end
 end)
 
-print("Loaded! (Modular Edition - ESP fix)")
+print("Loaded! (Modular Edition)")
